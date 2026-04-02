@@ -11,7 +11,7 @@ app.commandLine.appendSwitch('enable-logging');
 
 const URL_TO_LOAD = 'https://crm.brullov.com/app/rms-panel/room/test/1/';
 const CAPTURE_WINDOW_TITLE = 'Мой рабочий стол';
-const SHOW_CAPTURE_PREVIEW = true;
+const SHOW_CAPTURE_PREVIEW = false;
 // Автовыбор окна для шаринга (ставим после объявления)
 app.commandLine.appendSwitch('auto-select-desktop-capture-source', CAPTURE_WINDOW_TITLE);
 const PREFERRED_CAMERA_LABEL = 'A4tech FHD 1080P PC Camera';
