@@ -275,6 +275,10 @@ function createWindow() {
   ipcMain.on('go-home', () => {
     win.loadURL(URL_TO_LOAD);
   });
+
+  ipcMain.on('close-app', () => {
+    app.quit();
+  });
 }
 
 app.whenReady().then(() => {

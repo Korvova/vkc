@@ -18,7 +18,10 @@
       height: 100%;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 10px;
+      box-sizing: border-box;
     }
     button {
       font: 14px/1 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
@@ -33,15 +36,23 @@
     button:active {
       transform: translateY(1px);
     }
+    #close {
+      background: rgba(140,0,0,0.72);
+      border-color: rgba(255,120,120,0.35);
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <button id="back">Назад к расписанию</button>
+    <button id="close">Закрыть</button>
   </div>
   <script>
     document.getElementById('back').addEventListener('click', () => {
       window.controls?.goHome();
+    });
+    document.getElementById('close').addEventListener('click', () => {
+      window.controls?.closeApp();
     });
   </script>
 </body>
