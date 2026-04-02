@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Мой рабочий стол</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #fff;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+      opacity: 0.7;
+      background: rgba(0,0,0,0.4);
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="hint">Источник HDMI не найден</div>
+  <video id="video" autoplay playsinline muted></video>
+
+  <script>
+    const CAPTURE_DEVICE_LABEL = ''; // например: 'USB Video' или 'FHD Capture'
+    const EXCLUDED_DEVICE_LABEL = 'A4tech FHD 1080P PC Camera';
+    const PREFERRED_CAPTURE_KEYWORDS = ['usb', 'hdmi', 'capture', 'video', 'ms2109', 'macrosilicon'];
+    const hint = document.querySelector('.hint');
+    const video = document.getElementById('video');
+
+    async function startStream() {
+      try {
+        // Первый запрос, чтобы получить разрешение и раскрыть device labels
+        const initialStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        const initialVideoTrack = initialStream.getVideoTracks()[0];
+        const initialSettings = initialVideoTrack ? initialVideoTrack.getSettings() : {};
+        const initialDeviceId = initialSettings.deviceId || null;
+
+        let deviceId = null;
+        let selectedLabel = '';
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        console.log('Initial capture device:', JSON.stringify({ deviceId: initialDeviceId, label: initialVideoTrack ? initialVideoTrack.label : '' }));
+        console.log('Capture video devices:', JSON.stringify(videoDevices.map(d => ({ label: d.label, deviceId: d.deviceId }))));
+
+        if (CAPTURE_DEVICE_LABEL) {
+          const match = videoDevices.find(d => d.label.toLowerCase().includes(CAPTURE_DEVICE_LABEL.toLowerCase()));
+          if (match) {
+            deviceId = match.deviceId;
+            selectedLabel = match.label;
+          }
+        } else {
+          const preferred = videoDevices.find(d => {
+            const label = (d.label || '').toLowerCase();
+            return label &&
+              d.deviceId !== initialDeviceId &&
+              !label.includes(EXCLUDED_DEVICE_LABEL.toLowerCase()) &&
+              PREFERRED_CAPTURE_KEYWORDS.some(keyword => label.includes(keyword));
+          });
+
+          if (preferred) {
+            deviceId = preferred.deviceId;
+            selectedLabel = preferred.label;
+          } else {
+            const fallback = videoDevices.find(d =>
+              d.label &&
+              d.deviceId !== initialDeviceId &&
+              !d.label.toLowerCase().includes(EXCLUDED_DEVICE_LABEL.toLowerCase())
+            );
+            if (fallback) {
+              deviceId = fallback.deviceId;
+              selectedLabel = fallback.label;
+            }
+          }
+        }
+
+        console.log('Selected capture device:', JSON.stringify({ deviceId, label: selectedLabel }));
+
+        // Если найдена отдельная камера для демонстрации — переключаемся на нее
+        if (deviceId) {
+          initialStream.getTracks().forEach(t => t.stop());
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: deviceId } },
+            audio: false,
+          });
+          video.srcObject = stream;
+          hint.textContent = selectedLabel ? `Источник: ${selectedLabel}` : 'Источник HDMI подключен';
+        } else {
+          console.log('No separate capture device found, keeping initial stream');
+          video.srcObject = initialStream;
+          hint.textContent = 'Отдельный HDMI-источник не найден';
+        }
+
+        hint.style.display = 'block';
+      } catch (err) {
+        console.error('Camera error:', err);
+        hint.style.display = 'block';
+      }
+    }
+
+    startStream();
+  </script>
+</body>
+</html>
