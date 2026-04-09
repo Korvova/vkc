@@ -1,0 +1,9 @@
+{
+  "scheduleUrl": "https://crm.brullov.com/app/rms-panel/room/test/1/",
+  "preferredBrowser": "chrome",
+  "browserPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "mode": "windowed",
+  "openCaptureTab": true,
+  "capturePort": 65062,
+  "autoGrantMedia": false
+}

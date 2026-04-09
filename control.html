@@ -23,6 +23,16 @@
       padding: 0 10px;
       box-sizing: border-box;
     }
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     button {
       font: 14px/1 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
       padding: 10px 14px;
@@ -40,14 +50,33 @@
       background: rgba(140,0,0,0.72);
       border-color: rgba(255,120,120,0.35);
     }
+    .tab-btn {
+      background: rgba(20,20,20,0.8);
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <button id="back">Назад к расписанию</button>
-    <button id="close">Закрыть</button>
+    <div class="tabs">
+      <button id="tab-schedule" class="tab-btn">Вкладка: Расписание</button>
+      <button id="tab-capture" class="tab-btn">Вкладка: HDMI Capture</button>
+      <button id="tab-join" class="tab-btn">Вкладка: Join Widget</button>
+    </div>
+    <div class="actions">
+      <button id="back">Назад к расписанию</button>
+      <button id="close">Закрыть</button>
+    </div>
   </div>
   <script>
+    document.getElementById('tab-schedule').addEventListener('click', () => {
+      window.controls?.switchTab?.('schedule');
+    });
+    document.getElementById('tab-capture').addEventListener('click', () => {
+      window.controls?.switchTab?.('capture');
+    });
+    document.getElementById('tab-join').addEventListener('click', () => {
+      window.controls?.switchTab?.('join');
+    });
     document.getElementById('back').addEventListener('click', () => {
       window.controls?.goHome();
     });

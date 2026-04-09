@@ -4,6 +4,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "chrom:start": "cd Chrom && npm start",
+    "chrom:windowed": "cd Chrom && npm run start:windowed",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

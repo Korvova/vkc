@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "VKC Join Link Helper",
+  "version": "1.0.0",
+  "description": "Adds a visible join button when an MTS Link meeting URL is found on page.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://crm.brullov.com/*",
+        "https://*.mts-link.ru/*",
+        "https://mts-link.ru/*",
+        "https://my.mts-link.ru/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

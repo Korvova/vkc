@@ -30,24 +30,55 @@
       padding: 6px 10px;
       border-radius: 6px;
     }
+    .stop-share {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 3;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: rgba(180, 0, 0, 0.85);
+      color: #fff;
+      font: 600 14px/1 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+      cursor: pointer;
+      display: none;
+    }
+    .stop-share:active {
+      transform: translateY(1px);
+    }
   </style>
 </head>
 <body>
   <div class="hint">Источник HDMI не найден</div>
+  <button id="stopShareBtn" class="stop-share">Закрыть демонстрацию</button>
   <video id="video" autoplay playsinline muted></video>
 
   <script>
-    const CAPTURE_DEVICE_LABEL = ''; // например: 'USB Video' или 'FHD Capture'
+    const CAPTURE_DEVICE_LABEL = 'USB3.0 Capture Video';
     const EXCLUDED_DEVICE_LABEL = 'A4tech FHD 1080P PC Camera';
     const PREFERRED_CAPTURE_KEYWORDS = ['usb', 'hdmi', 'capture', 'video', 'ms2109', 'macrosilicon'];
     const hint = document.querySelector('.hint');
     const video = document.getElementById('video');
+    const stopShareBtn = document.getElementById('stopShareBtn');
+
+    if (window.captureTabControls?.stopShareAndCloseTab) {
+      stopShareBtn.style.display = 'block';
+      stopShareBtn.addEventListener('click', () => {
+        window.captureTabControls.stopShareAndCloseTab();
+      });
+    }
 
     async function startStream() {
       try {
+        const hdVideoConstraints = {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, max: 60 },
+        };
         // Первый запрос, чтобы получить разрешение и раскрыть device labels
         const initialStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: hdVideoConstraints,
           audio: false,
         });
         const initialVideoTrack = initialStream.getVideoTracks()[0];
@@ -62,6 +93,16 @@
         console.log('Capture video devices:', JSON.stringify(videoDevices.map(d => ({ label: d.label, deviceId: d.deviceId }))));
 
         if (CAPTURE_DEVICE_LABEL) {
+          const initialLabel = (initialVideoTrack && initialVideoTrack.label ? initialVideoTrack.label : '').toLowerCase();
+          if (initialLabel.includes(CAPTURE_DEVICE_LABEL.toLowerCase())) {
+            video.srcObject = initialStream;
+            hint.textContent = initialVideoTrack && initialVideoTrack.label
+              ? `Источник: ${initialVideoTrack.label}`
+              : 'Источник HDMI подключен';
+            hint.style.display = 'block';
+            return;
+          }
+
           const match = videoDevices.find(d => d.label.toLowerCase().includes(CAPTURE_DEVICE_LABEL.toLowerCase()));
           if (match) {
             deviceId = match.deviceId;
@@ -98,7 +139,10 @@
         if (deviceId) {
           initialStream.getTracks().forEach(t => t.stop());
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: deviceId } },
+            video: {
+              ...hdVideoConstraints,
+              deviceId: { exact: deviceId },
+            },
             audio: false,
           });
           video.srcObject = stream;

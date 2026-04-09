@@ -1,0 +1,11 @@
+{
+  "name": "vkc-chromium-kiosk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chromium-based kiosk launcher for MTS Link scenario",
+  "scripts": {
+    "start": "node launcher.js",
+    "start:windowed": "node launcher.js --windowed",
+    "start:kiosk": "node launcher.js --kiosk"
+  }
+}
