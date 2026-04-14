@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, session, ipcMain, desktopCapturer, dialog, shell, screen } = require('electron');
+const { app, BrowserWindow, BrowserView, session, ipcMain, desktopCapturer, shell, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -32,6 +32,7 @@ let scheduleViewRef = null;
 let captureTabViewRef = null;
 let joinWidgetViewRef = null;
 let activeMainTab = 'schedule';
+let lastActiveVksTab = 'schedule';
 let wasMainKioskBeforePicker = null;
 let wasMainFullscreenBeforePicker = null;
 let forceTabAudioShare = true;
@@ -935,6 +936,9 @@ function switchMainTab(tabName) {
   if (!mainWinRef || mainWinRef.isDestroyed()) return;
   const tab = tabName === 'capture' ? 'capture' : (tabName === 'join' ? 'join' : 'schedule');
   activeMainTab = tab;
+  if (tab !== 'capture') {
+    lastActiveVksTab = tab;
+  }
 
   try {
     mainWinRef.removeBrowserView(scheduleViewRef);
@@ -1182,8 +1186,9 @@ function createWindow() {
       captureTabViewRef = null;
     } catch (_) {}
 
-    // Возвращаем в вкладку с текущим созвоном.
-    switchMainTab('join');
+    // Возвращаемся в активную вкладку ВКС до перехода в HDMI Capture.
+    const returnTab = lastActiveVksTab === 'join' ? 'join' : 'schedule';
+    switchMainTab(returnTab);
 
     // Пересоздаем HDMI вкладку, чтобы была готова для следующего шаринга.
     setTimeout(() => {
@@ -1201,7 +1206,7 @@ function createWindow() {
       }
     }, 120);
 
-    logToFile('Capture tab closed by user; switched to join widget');
+    logToFile('Capture tab closed by user; switched to:', returnTab);
   });
 
   ipcMain.on('close-app', () => {
@@ -1360,6 +1365,15 @@ app.whenReady().then(() => {
         return safeCallback(streams);
       }
 
+      try {
+        if (captureTabViewRef && captureTabViewRef.webContents && !captureTabViewRef.webContents.isDestroyed() && captureTabViewRef.webContents.mainFrame) {
+          const frame = captureTabViewRef.webContents.mainFrame;
+          switchMainTab('capture');
+          logToFile('Selected source (forced single tab):', { label: 'Вкладка: HDMI Capture', tabKey: 'capture' });
+          return safeCallback(withTabAudioIfRequested({ video: frame }, frame));
+        }
+      } catch (_) {}
+
       const sources = await desktopCapturer.getSources({
         types: ['window'],
         fetchWindowIcons: false,
@@ -1380,87 +1394,15 @@ app.whenReady().then(() => {
       });
       const usableSources = filteredSources.length ? filteredSources : sources;
 
-      const tabCandidates = [];
-      try {
-        if (scheduleViewRef && scheduleViewRef.webContents && !scheduleViewRef.webContents.isDestroyed() && scheduleViewRef.webContents.mainFrame) {
-          tabCandidates.push({
-            kind: 'tab',
-            tabKey: 'schedule',
-            label: 'Вкладка: Расписание',
-            frame: scheduleViewRef.webContents.mainFrame,
-          });
-        }
-      } catch (_) {}
-      try {
-        if (captureTabViewRef && captureTabViewRef.webContents && !captureTabViewRef.webContents.isDestroyed() && captureTabViewRef.webContents.mainFrame) {
-          tabCandidates.push({
-            kind: 'tab',
-            tabKey: 'capture',
-            label: 'Вкладка: HDMI Capture',
-            frame: captureTabViewRef.webContents.mainFrame,
-          });
-        }
-      } catch (_) {}
-      try {
-        if (joinWidgetViewRef && joinWidgetViewRef.webContents && !joinWidgetViewRef.webContents.isDestroyed() && joinWidgetViewRef.webContents.mainFrame) {
-          tabCandidates.push({
-            kind: 'tab',
-            tabKey: 'join',
-            label: 'Вкладка: Join Widget',
-            frame: joinWidgetViewRef.webContents.mainFrame,
-          });
-        }
-      } catch (_) {}
-
       const byNameIndex = usableSources.findIndex(src => src.name === CAPTURE_WINDOW_TITLE);
       const byIdIndex = captureId ? usableSources.findIndex(src => src.id === captureId) : -1;
       const preferredWindowIndex =
         byIdIndex >= 0
           ? byIdIndex
           : (byNameIndex >= 0 ? byNameIndex : 0);
-
-      const candidateEntries = [
-        ...tabCandidates,
-        ...usableSources.map((src, index) => ({
-          kind: 'window',
-          label: `${src.name || src.id}${index === preferredWindowIndex ? ' (рекомендуется)' : ''}`,
-          source: src,
-        })),
-      ];
-      const labels = candidateEntries.map((entry) => entry.label);
-      const defaultId = tabCandidates.length + Math.max(preferredWindowIndex, 0);
-      const clampedDefaultId = defaultId >= 0 && defaultId < labels.length ? defaultId : 0;
-      const cancelId = labels.length;
-
-      if (!labels.length) {
-        return safeCallback({});
-      }
-
-      const result = await dialog.showMessageBox(mainWinRef || undefined, {
-        type: 'question',
-        buttons: [...labels, 'Отмена'],
-        defaultId: clampedDefaultId,
-        cancelId,
-        noLink: true,
-        title: 'Выбор источника демонстрации',
-        message: 'Выберите вкладку или окно для демонстрации',
-        detail: 'Для лучшего качества выберите окно "Мой рабочий стол" или вкладку HDMI Capture.',
-      });
-
-      if (result.response === cancelId) return safeCallback({});
-      const selectedEntry = candidateEntries[result.response];
-      if (!selectedEntry) return safeCallback({});
-
-      if (selectedEntry.kind === 'tab' && selectedEntry.frame) {
-        const tabKey = selectedEntry.tabKey || 'schedule';
-        switchMainTab(tabKey);
-        logToFile('Selected source (manual tab):', { label: selectedEntry.label, tabKey });
-        return safeCallback(withTabAudioIfRequested({ video: selectedEntry.frame }, selectedEntry.frame));
-      }
-
-      const selected = selectedEntry.source;
+      const selected = usableSources[Math.max(preferredWindowIndex, 0)];
       if (!selected) return safeCallback({});
-      logToFile('Selected source (manual window):', { id: selected.id, name: selected.name });
+      logToFile('Selected source (forced single window):', { id: selected.id, name: selected.name });
       if (selected.name === CAPTURE_WINDOW_TITLE) {
         bringCaptureWindowToFront();
       }
