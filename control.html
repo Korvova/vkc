@@ -33,6 +33,23 @@
       align-items: center;
       gap: 8px;
     }
+    .share-audio-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #fff;
+      font: 13px/1 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      padding: 8px 10px;
+      user-select: none;
+    }
+    .share-audio-toggle input {
+      width: 16px;
+      height: 16px;
+      accent-color: #2d8cff;
+    }
     button {
       font: 14px/1 system-ui, -apple-system, Segoe UI, Arial, sans-serif;
       padding: 10px 14px;
@@ -63,11 +80,16 @@
       <button id="tab-join" class="tab-btn">Вкладка: Join Widget</button>
     </div>
     <div class="actions">
+      <label class="share-audio-toggle" for="forceTabAudio">
+        <input id="forceTabAudio" type="checkbox" />
+        Передавать звук вкладки
+      </label>
       <button id="back">Назад к расписанию</button>
       <button id="close">Закрыть</button>
     </div>
   </div>
   <script>
+    const forceTabAudio = document.getElementById('forceTabAudio');
     document.getElementById('tab-schedule').addEventListener('click', () => {
       window.controls?.switchTab?.('schedule');
     });
@@ -82,6 +104,19 @@
     });
     document.getElementById('close').addEventListener('click', () => {
       window.controls?.closeApp();
+    });
+
+    (async () => {
+      try {
+        const enabled = await window.controls?.getForceTabAudio?.();
+        forceTabAudio.checked = !!enabled;
+      } catch (_) {
+        forceTabAudio.checked = true;
+      }
+    })();
+
+    forceTabAudio.addEventListener('change', () => {
+      window.controls?.setForceTabAudio?.(!!forceTabAudio.checked);
     });
   </script>
 </body>

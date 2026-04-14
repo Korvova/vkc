@@ -34,6 +34,13 @@
       align-items: center;
       flex-wrap: wrap;
     }
+    .danger-btn {
+      border-color: rgba(255, 120, 120, 0.45);
+      background: rgba(145, 0, 0, 0.8);
+    }
+    .danger-btn:hover {
+      background: rgba(175, 0, 0, 0.88);
+    }
     button {
       border: 1px solid #3a3a3a;
       background: #1f1f1f;
@@ -44,6 +51,22 @@
       font-size: 12px;
     }
     button:hover { background: #2a2a2a; }
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #e5e7eb;
+    }
+    select {
+      border: 1px solid #3a3a3a;
+      background: #1f1f1f;
+      color: #fff;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      max-width: 280px;
+    }
     video {
       width: 100%;
       height: 100%;
@@ -58,18 +81,34 @@
     <div class="controls">
       <button id="startBtn" type="button">Запустить HDMI</button>
       <button id="retryBtn" type="button">Повторить</button>
+      <button id="stopShareBtn" class="danger-btn" type="button">Закрыть демонстрацию</button>
+      <label for="audioSelect">
+        Аудио:
+        <select id="audioSelect">
+          <option value="__auto__">Авто (HDMI/USB)</option>
+          <option value="__none__">Без звука</option>
+        </select>
+      </label>
     </div>
   </div>
-  <video id="video" autoplay playsinline muted></video>
+  <video id="video" autoplay playsinline></video>
 
   <script>
     const CAPTURE_DEVICE_LABEL = 'USB3.0 Capture Video';
     const EXCLUDED_DEVICE_LABEL = 'A4tech FHD 1080P PC Camera';
     const PREFERRED_CAPTURE_KEYWORDS = ['usb', 'hdmi', 'capture', 'video', 'ms2109', 'macrosilicon'];
+    const PREFERRED_AUDIO_KEYWORDS = ['usb', 'hdmi', 'capture', 'audio', 'digital', 'ms2109', 'macrosilicon'];
+    const STRONG_PREFERRED_AUDIO_LABELS = [
+      'usb3.0 capture digital audio',
+      'capture digital audio',
+    ];
+    const AUDIO_SELECT_STORAGE_KEY = 'vkc_capture_audio_device_id';
     const hint = document.getElementById('hint');
     const video = document.getElementById('video');
     const startBtn = document.getElementById('startBtn');
     const retryBtn = document.getElementById('retryBtn');
+    const stopShareBtn = document.getElementById('stopShareBtn');
+    const audioSelect = document.getElementById('audioSelect');
     let currentStream = null;
     let started = false;
 
@@ -81,6 +120,102 @@
       } catch (_) {}
       currentStream = null;
       video.srcObject = null;
+    }
+
+    async function attachStream(stream) {
+      currentStream = stream;
+      video.muted = false;
+      video.volume = 1;
+      video.srcObject = currentStream;
+      try { await video.play(); } catch (_) {}
+    }
+
+    function findPreferredAudioDevice(audioDevices) {
+      const scored = audioDevices
+        .map((d) => {
+          const label = (d.label || '').toLowerCase();
+          if (!label) return { device: d, score: -1 };
+          if (label.includes('a4tech') || label.includes('pc camera')) return { device: d, score: -1 };
+          if (STRONG_PREFERRED_AUDIO_LABELS.some((strong) => label.includes(strong))) {
+            return { device: d, score: 100 };
+          }
+          let score = 0;
+          if (label.includes('capture')) score += 30;
+          if (label.includes('digital')) score += 25;
+          if (label.includes('hdmi')) score += 20;
+          if (label.includes('usb')) score += 10;
+          if (PREFERRED_AUDIO_KEYWORDS.some((k) => label.includes(k))) score += 5;
+          return { device: d, score };
+        })
+        .filter((x) => x.score >= 0)
+        .sort((a, b) => b.score - a.score);
+
+      return scored.length ? scored[0].device : null;
+    }
+
+    function populateAudioSelect(devices) {
+      const audioDevices = devices.filter(d => d.kind === 'audioinput');
+      const saved = localStorage.getItem(AUDIO_SELECT_STORAGE_KEY) || '__auto__';
+      const preferred = findPreferredAudioDevice(audioDevices);
+      const preferredId = preferred ? preferred.deviceId : '';
+      const prev = audioSelect.value || saved;
+
+      audioSelect.innerHTML = '';
+      audioSelect.add(new Option('Авто (HDMI/USB)', '__auto__'));
+      audioSelect.add(new Option('Без звука', '__none__'));
+      for (const device of audioDevices) {
+        const label = device.label || 'Неизвестный вход';
+        audioSelect.add(new Option(label, device.deviceId));
+      }
+
+      const target =
+        (prev && [...audioSelect.options].some(o => o.value === prev) && prev) ||
+        (saved && [...audioSelect.options].some(o => o.value === saved) && saved) ||
+        (preferredId && [...audioSelect.options].some(o => o.value === preferredId) && preferredId) ||
+        '__auto__';
+      audioSelect.value = target;
+    }
+
+    function buildAudioConstraint(devices) {
+      const audioDevices = devices.filter(d => d.kind === 'audioinput');
+      const selected = audioSelect.value || '__auto__';
+      if (selected === '__none__') return false;
+
+      let deviceId = null;
+      if (selected === '__auto__') {
+        const preferred = findPreferredAudioDevice(audioDevices);
+        deviceId = preferred ? preferred.deviceId : null;
+      } else if (audioDevices.some(d => d.deviceId === selected)) {
+        deviceId = selected;
+      }
+
+      if (!deviceId) return false;
+      return {
+        deviceId: { exact: deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      };
+    }
+
+    async function openStreamWithAudioFallback(videoConstraints, audioConstraint) {
+      if (!audioConstraint) {
+        return navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+      }
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: audioConstraint,
+        });
+      } catch (_) {
+        return navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+      }
     }
 
     async function startStream() {
@@ -110,13 +245,23 @@
 
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        populateAudioSelect(devices);
+        const audioConstraint = buildAudioConstraint(devices);
 
         let deviceId = null;
         let selectedLabel = '';
 
         if (initialLabel.toLowerCase().includes(CAPTURE_DEVICE_LABEL.toLowerCase())) {
-          currentStream = initialStream;
-          video.srcObject = currentStream;
+          if (audioConstraint) {
+            initialStream.getTracks().forEach(t => t.stop());
+            const stream = await openStreamWithAudioFallback(
+              initialDeviceId ? { ...hdVideoConstraints, deviceId: { exact: initialDeviceId } } : hdVideoConstraints,
+              audioConstraint
+            );
+            await attachStream(stream);
+          } else {
+            await attachStream(initialStream);
+          }
           hint.textContent = `HDMI Capture: ${initialLabel}`;
           return;
         }
@@ -142,22 +287,17 @@
         }
 
         if (!deviceId) {
-          currentStream = initialStream;
-          video.srcObject = currentStream;
+          await attachStream(initialStream);
           hint.textContent = 'HDMI Capture: используется текущая камера (отдельный HDMI источник не найден)';
           return;
         }
 
         initialStream.getTracks().forEach(t => t.stop());
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            ...hdVideoConstraints,
-            deviceId: { exact: deviceId },
-          },
-          audio: false,
-        });
-        currentStream = stream;
-        video.srcObject = currentStream;
+        const stream = await openStreamWithAudioFallback({
+          ...hdVideoConstraints,
+          deviceId: { exact: deviceId },
+        }, audioConstraint);
+        await attachStream(stream);
         hint.textContent = `HDMI Capture: ${selectedLabel}`;
       } catch (err) {
         hint.textContent = `HDMI Capture: ошибка доступа (${err && err.name ? err.name : 'unknown'})`;
@@ -169,6 +309,16 @@
 
     startBtn.addEventListener('click', () => startStream());
     retryBtn.addEventListener('click', () => startStream());
+    stopShareBtn.addEventListener('click', () => {
+      try { stopCurrent(); } catch (_) {}
+      window.captureTabControls?.stopShareAndCloseTab?.();
+    });
+    audioSelect.addEventListener('change', () => {
+      try {
+        localStorage.setItem(AUDIO_SELECT_STORAGE_KEY, audioSelect.value || '__auto__');
+      } catch (_) {}
+      if (currentStream) startStream();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && !currentStream) {
         startStream();

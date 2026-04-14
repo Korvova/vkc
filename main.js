@@ -34,6 +34,7 @@ let joinWidgetViewRef = null;
 let activeMainTab = 'schedule';
 let wasMainKioskBeforePicker = null;
 let wasMainFullscreenBeforePicker = null;
+let forceTabAudioShare = true;
 const LOG_PATH = path.join(__dirname, 'debug.log');
 const FORCE_EXTERNAL_MTS_LINK = false;
 const ENABLE_MTS_TAB_CAPTURE_EXPERIMENT = false;
@@ -521,6 +522,13 @@ function injectShareLifecycleBridge(webContents) {
           window.__vkcDisplayStreams = new Set();
         } catch (_) {}
         try {
+          const aux = Array.from(window.__vkcAuxAudioStreams || []);
+          aux.forEach((s) => {
+            try { s.getTracks().forEach(t => t.stop()); } catch (_) {}
+          });
+          window.__vkcAuxAudioStreams = new Set();
+        } catch (_) {}
+        try {
           const stream = window.__vkcLastDisplayStream;
           if (stream && stream.getTracks) {
             stream.getTracks().forEach(t => t.stop());
@@ -530,6 +538,90 @@ function injectShareLifecycleBridge(webContents) {
         try {
           window.electronAPI?.setShareActive?.(false);
         } catch (_) {}
+      };
+
+      const pickPreferredShareAudioInput = async () => {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const audioInputs = devices.filter(d => d.kind === 'audioinput');
+          const strong = ['usb3.0 capture digital audio', 'capture digital audio'];
+          const soft = ['capture', 'digital', 'hdmi', 'usb'];
+          const sorted = audioInputs
+            .map((d) => {
+              const label = (d.label || '').toLowerCase();
+              if (!label) return { device: d, score: -1 };
+              if (label.includes('a4tech') || label.includes('pc camera')) return { device: d, score: -1 };
+              if (strong.some((k) => label.includes(k))) return { device: d, score: 100 };
+              let score = 0;
+              if (label.includes('capture')) score += 35;
+              if (label.includes('digital')) score += 30;
+              if (label.includes('hdmi')) score += 20;
+              if (label.includes('usb')) score += 10;
+              if (soft.some((k) => label.includes(k))) score += 5;
+              return { device: d, score };
+            })
+            .filter((x) => x.score >= 0)
+            .sort((a, b) => b.score - a.score);
+          return sorted.length ? sorted[0].device : null;
+        } catch (_) {
+          return null;
+        }
+      };
+
+      const ensureShareAudioTrack = async (stream, constraints) => {
+        try {
+          if (!stream || !stream.addTrack || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+          const requestedAudio = !!(
+            constraints &&
+            ((typeof constraints === 'object' && constraints.audio) || constraints === true)
+          );
+          if (!requestedAudio) return;
+
+          const preferredInput = await pickPreferredShareAudioInput();
+          const audioConstraint = preferredInput
+            ? {
+                deviceId: { exact: preferredInput.deviceId },
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              }
+            : true;
+
+          let audioStream = null;
+          try {
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false });
+          } catch (_) {
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          }
+          const audioTrack = audioStream && audioStream.getAudioTracks ? audioStream.getAudioTracks()[0] : null;
+          if (!audioTrack) {
+            try { audioStream && audioStream.getTracks && audioStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+            return;
+          }
+          const existingAudioTracks = stream.getAudioTracks ? stream.getAudioTracks() : [];
+          existingAudioTracks.forEach((t) => {
+            try { if (stream.removeTrack) stream.removeTrack(t); } catch (_) {}
+            try { t.stop(); } catch (_) {}
+          });
+          stream.addTrack(audioTrack);
+          if (!window.__vkcAuxAudioStreams) window.__vkcAuxAudioStreams = new Set();
+          window.__vkcAuxAudioStreams.add(audioStream);
+          audioTrack.addEventListener('ended', () => {
+            try {
+              if (window.__vkcAuxAudioStreams) window.__vkcAuxAudioStreams.delete(audioStream);
+              audioStream.getTracks().forEach(t => t.stop());
+            } catch (_) {}
+          }, { once: true });
+          try {
+            console.log('VKC share audio fallback attached:', JSON.stringify({
+              deviceLabel: preferredInput ? preferredInput.label : null,
+              deviceId: preferredInput ? preferredInput.deviceId : null,
+              replacedTracks: existingAudioTracks.length
+            }));
+          } catch (_) {}
+        } catch (err) {
+          try { console.log('VKC share audio fallback error:', String(err)); } catch (_) {}
+        }
       };
 
       const original = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
@@ -569,10 +661,19 @@ function injectShareLifecycleBridge(webContents) {
           }));
         } catch (_) {}
 
+        await ensureShareAudioTrack(stream, constraints);
+
         const notifyStopped = () => {
           try {
             const hasLiveTracks = stream.getTracks().some(t => t.readyState === 'live');
             if (!hasLiveTracks) {
+              try {
+                const aux = Array.from(window.__vkcAuxAudioStreams || []);
+                aux.forEach((s) => {
+                  try { s.getTracks().forEach(t => t.stop()); } catch (_) {}
+                });
+                window.__vkcAuxAudioStreams = new Set();
+              } catch (_) {}
               try { window.__vkcDisplayStreams.delete(stream); } catch (_) {}
               window.__vkcLastDisplayStream = null;
               window.electronAPI?.setShareActive?.(false);
@@ -826,7 +927,7 @@ function createCaptureTabView() {
   view.webContents.on('console-message', (event, level, message) => {
     logToFile('CaptureTab console:', message);
   });
-  view.webContents.loadFile('capture.html');
+  view.webContents.loadFile(path.join('Chrom', 'capture-tab.html'));
   return view;
 }
 
@@ -1060,6 +1161,13 @@ function createWindow() {
   ipcMain.on('switch-main-tab', (_event, tab) => {
     switchMainTab(tab === 'capture' ? 'capture' : (tab === 'join' ? 'join' : 'schedule'));
   });
+  ipcMain.on('set-force-tab-audio', (_event, enabled) => {
+    forceTabAudioShare = !!enabled;
+    logToFile('Force tab audio changed:', forceTabAudioShare);
+  });
+  ipcMain.handle('get-force-tab-audio', () => {
+    return forceTabAudioShare;
+  });
 
   ipcMain.on('capture-tab-stop-share', () => {
     // Не убиваем поток вручную: закрываем вкладку-источник,
@@ -1192,6 +1300,11 @@ app.whenReady().then(() => {
   if (USE_CUSTOM_SHARE_HANDLER) {
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     let callbackCalled = false;
+    const withTabAudioIfRequested = (payload = {}, frame = null) => {
+      if (!frame) return payload;
+      if (!forceTabAudioShare && (!request || !request.audioRequested)) return payload;
+      return { ...payload, audio: frame };
+    };
     const safeCallback = (payload = {}) => {
       if (callbackCalled) {
         logToFile('Display media callback already called, ignoring payload');
@@ -1223,7 +1336,7 @@ app.whenReady().then(() => {
             ? captureWinRef.webContents.mainFrame
             : (scheduleWC && !scheduleWC.isDestroyed() ? scheduleWC.mainFrame : null);
         if (frame) {
-          const streams = { video: frame };
+          const streams = withTabAudioIfRequested({ video: frame }, frame);
           logToFile('Selected source (MTS tab-capture experiment):', {
             url: currentUrl,
             target: frame === (captureWinRef && captureWinRef.webContents ? captureWinRef.webContents.mainFrame : null)
@@ -1241,7 +1354,8 @@ app.whenReady().then(() => {
         captureWinRef.webContents &&
         captureWinRef.webContents.mainFrame
       ) {
-        const streams = { video: captureWinRef.webContents.mainFrame };
+        const frame = captureWinRef.webContents.mainFrame;
+        const streams = withTabAudioIfRequested({ video: frame }, frame);
         logToFile('Selected source (tab-like):', { title: CAPTURE_WINDOW_TITLE });
         return safeCallback(streams);
       }
@@ -1341,7 +1455,7 @@ app.whenReady().then(() => {
         const tabKey = selectedEntry.tabKey || 'schedule';
         switchMainTab(tabKey);
         logToFile('Selected source (manual tab):', { label: selectedEntry.label, tabKey });
-        return safeCallback({ video: selectedEntry.frame });
+        return safeCallback(withTabAudioIfRequested({ video: selectedEntry.frame }, selectedEntry.frame));
       }
 
       const selected = selectedEntry.source;
